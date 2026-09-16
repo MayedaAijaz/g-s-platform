@@ -1,0 +1,792 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// GS Medcure — Prisma Schema
+// ⚠️  SYNTHETIC / DEMO DATA ONLY. Not connected to any real G&S Medcure system.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users & Auth ─────────────────────────────────────────────────────────────
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  name        String
+  passwordHash String
+  role        UserRole @default(VIEWER)
+  employeeId  String?  @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  productionLogs     ProductionLog[]
+  qcInspections      QCInspection[]
+  sterilizationCycles SterilizationCycle[]
+  goodsReceipts      GoodsReceipt[]
+  auditLogs          AuditLog[]
+  batchOperators     BatchOperator[]
+  maintenanceRecords MaintenanceRecord[]
+
+  @@index([email])
+  @@index([role])
+}
+
+enum UserRole {
+  ADMIN
+  PRODUCTION_MANAGER
+  PRODUCTION_OPERATOR
+  QC_MANAGER
+  QC_INSPECTOR
+  WAREHOUSE_MANAGER
+  WAREHOUSE_OPERATOR
+  PROCUREMENT_OFFICER
+  STERILIZATION_OPERATOR
+  VIEWER
+}
+
+// ─── Products ─────────────────────────────────────────────────────────────────
+
+model Product {
+  id                  String   @id @default(uuid())
+  code                String   @unique
+  name                String
+  description         String?
+  productFamily       String?
+  regulatoryClass     String?
+  draRegistrationNo   String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  variants ProductVariant[]
+
+  @@index([code])
+}
+
+model ProductVariant {
+  id               String   @id @default(uuid())
+  productId        String
+  sku              String   @unique
+  name             String
+  size             String?
+  needleGauge      String?
+  barrelCapacityMl Decimal?
+  packagingConfig  String?
+  unitsPerBox      Int?
+  boxesPerCarton   Int?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  product         Product          @relation(fields: [productId], references: [id])
+  productionOrders ProductionOrder[]
+  qcTemplates     QCTemplate[]
+
+  @@index([productId])
+  @@index([sku])
+}
+
+// ─── Suppliers ────────────────────────────────────────────────────────────────
+
+model Supplier {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  name          String
+  country       String?
+  contactName   String?
+  contactEmail  String?
+  contactPhone  String?
+  address       String?
+  isApproved    Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+  materialLots   MaterialLot[]
+
+  @@index([code])
+}
+
+// ─── Purchasing ───────────────────────────────────────────────────────────────
+
+model PurchaseOrder {
+  id         String              @id @default(uuid())
+  supplierId String
+  poNumber   String              @unique
+  status     PurchaseOrderStatus @default(DRAFT)
+  orderDate  DateTime
+  notes      String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  items        PurchaseOrderItem[]
+  goodsReceipts GoodsReceipt[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([poNumber])
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SUBMITTED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrderItem {
+  id                   String   @id @default(uuid())
+  purchaseOrderId      String
+  materialId           String
+  quantity             Decimal
+  unitPrice            Decimal
+  currency             String   @default("USD")
+  expectedDeliveryDate DateTime?
+  receivedQuantity     Decimal  @default(0)
+  notes                String?
+  createdAt            DateTime @default(now())
+
+  purchaseOrder  PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  material       Material           @relation(fields: [materialId], references: [id])
+  receiptItems   GoodsReceiptItem[]
+
+  @@index([purchaseOrderId])
+  @@index([materialId])
+}
+
+model GoodsReceipt {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  receivedAt      DateTime @default(now())
+  receivedById    String
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  receivedBy    User               @relation(fields: [receivedById], references: [id])
+  items         GoodsReceiptItem[]
+
+  @@index([purchaseOrderId])
+}
+
+model GoodsReceiptItem {
+  id              String    @id @default(uuid())
+  goodsReceiptId  String
+  poItemId        String
+  quantityReceived Decimal
+  lotNumber       String
+  expiryDate      DateTime?
+  locationId      String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  goodsReceipt GoodsReceipt     @relation(fields: [goodsReceiptId], references: [id])
+  poItem       PurchaseOrderItem @relation(fields: [poItemId], references: [id])
+  location     WarehouseLocation? @relation(fields: [locationId], references: [id])
+
+  @@index([goodsReceiptId])
+  @@index([poItemId])
+}
+
+// ─── Materials & Lots ─────────────────────────────────────────────────────────
+
+model Material {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  name          String
+  description   String?
+  materialType  String
+  unitOfMeasure String
+  reorderPoint  Decimal?
+  standardCost  Decimal?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lots               MaterialLot[]
+  purchaseOrderItems PurchaseOrderItem[]
+  inventoryBalances  InventoryBalance[]
+
+  @@index([code])
+}
+
+model MaterialLot {
+  id                  String    @id @default(uuid())
+  materialId          String
+  lotNumber           String    @unique
+  supplierId          String?
+  supplierLotNumber   String?
+  manufacturingDate   DateTime?
+  expiryDate          DateTime?
+  initialQuantity     Decimal
+  remainingQuantity   Decimal
+  locationId          String?
+  certificateOfAnalysis String?
+  notes               String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  material     Material          @relation(fields: [materialId], references: [id])
+  supplier     Supplier?         @relation(fields: [supplierId], references: [id])
+  location     WarehouseLocation? @relation(fields: [locationId], references: [id])
+  batchMaterials BatchMaterial[]
+  transactions InventoryTransaction[]
+
+  @@index([materialId])
+  @@index([lotNumber])
+  @@index([supplierId])
+}
+
+// ─── Warehouse & Inventory ────────────────────────────────────────────────────
+
+model Warehouse {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locations WarehouseLocation[]
+
+  @@index([code])
+}
+
+model WarehouseLocation {
+  id          String   @id @default(uuid())
+  warehouseId String
+  code        String   @unique
+  name        String?
+  zone        String?
+  aisle       String?
+  rack        String?
+  bin         String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  warehouse          Warehouse          @relation(fields: [warehouseId], references: [id])
+  materialLots       MaterialLot[]
+  inventoryBalances  InventoryBalance[]
+  receiptItems       GoodsReceiptItem[]
+  finishedGoods      FinishedGood[]
+  txFrom             InventoryTransaction[] @relation("TxFrom")
+  txTo               InventoryTransaction[] @relation("TxTo")
+
+  @@index([warehouseId])
+  @@index([code])
+}
+
+model InventoryBalance {
+  id          String   @id @default(uuid())
+  materialId  String
+  locationId  String
+  quantity    Decimal
+  updatedAt   DateTime @updatedAt
+
+  material  Material          @relation(fields: [materialId], references: [id])
+  location  WarehouseLocation @relation(fields: [locationId], references: [id])
+
+  @@unique([materialId, locationId])
+  @@index([materialId])
+  @@index([locationId])
+}
+
+model InventoryTransaction {
+  id              String                   @id @default(uuid())
+  materialLotId   String
+  fromLocationId  String?
+  toLocationId    String?
+  transactionType InventoryTransactionType
+  quantity        Decimal
+  referenceId     String?
+  referenceType   String?
+  notes           String?
+  createdAt       DateTime                 @default(now())
+
+  materialLot  MaterialLot       @relation(fields: [materialLotId], references: [id])
+  fromLocation WarehouseLocation? @relation("TxFrom", fields: [fromLocationId], references: [id])
+  toLocation   WarehouseLocation? @relation("TxTo", fields: [toLocationId], references: [id])
+
+  @@index([materialLotId])
+  @@index([referenceId])
+  @@index([transactionType])
+}
+
+enum InventoryTransactionType {
+  GOODS_RECEIPT
+  BATCH_CONSUMPTION
+  ADJUSTMENT
+  TRANSFER
+  RETURN
+  SCRAP
+}
+
+// ─── Production ───────────────────────────────────────────────────────────────
+
+model ProductionLine {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  machines          Machine[]
+  productionOrders  ProductionOrder[]
+
+  @@index([code])
+}
+
+model Machine {
+  id               String        @id @default(uuid())
+  productionLineId String
+  code             String        @unique
+  name             String
+  machineType      String
+  status           MachineStatus @default(IDLE)
+  isActive         Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  productionLine     ProductionLine       @relation(fields: [productionLineId], references: [id])
+  productionBatches  ProductionBatch[]
+  maintenanceRecords MaintenanceRecord[]
+
+  @@index([productionLineId])
+  @@index([code])
+}
+
+enum MachineStatus {
+  OPERATIONAL
+  MAINTENANCE
+  BREAKDOWN
+  IDLE
+}
+
+model ProductionOrder {
+  id               String   @id @default(uuid())
+  productVariantId String
+  productionLineId String
+  orderNumber      String   @unique
+  plannedQuantity  Int
+  producedQuantity Int      @default(0)
+  plannedStartDate DateTime
+  plannedEndDate   DateTime?
+  actualStartDate  DateTime?
+  actualEndDate    DateTime?
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  productVariant ProductVariant  @relation(fields: [productVariantId], references: [id])
+  productionLine ProductionLine  @relation(fields: [productionLineId], references: [id])
+  batches        ProductionBatch[]
+
+  @@index([productVariantId])
+  @@index([productionLineId])
+  @@index([orderNumber])
+}
+
+model ProductionBatch {
+  id                String      @id @default(uuid())
+  productionOrderId String
+  batchNumber       String      @unique
+  machineId         String?
+  status            BatchStatus @default(DRAFT)
+  plannedQuantity   Int
+  producedQuantity  Int         @default(0)
+  rejectedQuantity  Int         @default(0)
+  startTime         DateTime?
+  endTime           DateTime?
+  releasedAt        DateTime?
+  releasedById      String?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  productionOrder    ProductionOrder    @relation(fields: [productionOrderId], references: [id])
+  machine            Machine?           @relation(fields: [machineId], references: [id])
+  operators          BatchOperator[]
+  batchMaterials     BatchMaterial[]
+  productionLogs     ProductionLog[]
+  qcInspections      QCInspection[]
+  sterilizationBatches SterilizationBatch[]
+  nonConformances    NonConformance[]
+  finishedGoods      FinishedGood[]
+
+  @@index([productionOrderId])
+  @@index([status])
+  @@index([batchNumber])
+}
+
+enum BatchStatus {
+  DRAFT
+  IN_PRODUCTION
+  QC_HOLD
+  RELEASED
+  REJECTED
+}
+
+model BatchOperator {
+  id      String @id @default(uuid())
+  batchId String
+  userId  String
+
+  batch ProductionBatch @relation(fields: [batchId], references: [id])
+  user  User            @relation(fields: [userId], references: [id])
+
+  @@unique([batchId, userId])
+  @@index([batchId])
+}
+
+model BatchMaterial {
+  id               String   @id @default(uuid())
+  batchId          String
+  materialLotId    String
+  plannedQuantity  Decimal
+  actualQuantity   Decimal?
+  consumedAt       DateTime?
+  createdAt        DateTime @default(now())
+
+  batch       ProductionBatch @relation(fields: [batchId], references: [id])
+  materialLot MaterialLot    @relation(fields: [materialLotId], references: [id])
+
+  @@unique([batchId, materialLotId])
+  @@index([batchId])
+  @@index([materialLotId])
+}
+
+model ProductionLog {
+  id          String   @id @default(uuid())
+  batchId     String
+  logTime     DateTime @default(now())
+  eventType   String
+  description String
+  value       String?
+  unit        String?
+  operatorId  String?
+  createdAt   DateTime @default(now())
+
+  batch    ProductionBatch @relation(fields: [batchId], references: [id])
+  operator User?           @relation(fields: [operatorId], references: [id])
+
+  @@index([batchId])
+  @@index([eventType])
+}
+
+// ─── QC ──────────────────────────────────────────────────────────────────────
+
+model QCTemplate {
+  id               String   @id @default(uuid())
+  name             String
+  productVariantId String?
+  version          String   @default("1.0")
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  productVariant ProductVariant?    @relation(fields: [productVariantId], references: [id])
+  parameters     QCTemplateParameter[]
+  inspections    QCInspection[]
+
+  @@index([productVariantId])
+}
+
+model QCTemplateParameter {
+  id             String  @id @default(uuid())
+  templateId     String
+  parameterName  String
+  parameterCode  String
+  unit           String?
+  minValue       Decimal?
+  maxValue       Decimal?
+  expectedValue  String?
+  isCritical     Boolean @default(false)
+  sortOrder      Int     @default(0)
+
+  template QCTemplate @relation(fields: [templateId], references: [id])
+  results  QCResult[]
+
+  @@index([templateId])
+}
+
+model QCInspection {
+  id             String   @id @default(uuid())
+  batchId        String
+  templateId     String
+  inspectorId    String
+  sampleSize     Int
+  inspectionDate DateTime @default(now())
+  overallStatus  QCStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  batch     ProductionBatch @relation(fields: [batchId], references: [id])
+  template  QCTemplate      @relation(fields: [templateId], references: [id])
+  inspector User            @relation(fields: [inspectorId], references: [id])
+  results   QCResult[]
+
+  @@index([batchId])
+  @@index([inspectorId])
+  @@index([overallStatus])
+}
+
+enum QCStatus {
+  PENDING
+  IN_PROGRESS
+  PASSED
+  FAILED
+  CONDITIONALLY_RELEASED
+}
+
+model QCResult {
+  id           String   @id @default(uuid())
+  inspectionId String
+  parameterId  String
+  actualValue  String
+  passed       Boolean
+  notes        String?
+  recordedAt   DateTime @default(now())
+
+  inspection QCInspection        @relation(fields: [inspectionId], references: [id])
+  parameter  QCTemplateParameter @relation(fields: [parameterId], references: [id])
+
+  @@index([inspectionId])
+  @@index([parameterId])
+}
+
+model NonConformance {
+  id               String   @id @default(uuid())
+  batchId          String
+  inspectionId     String?
+  description      String
+  severity         NCRSeverity
+  disposition      NCRDisposition?
+  rootCause        String?
+  correctiveAction String?
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  batch ProductionBatch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@index([severity])
+}
+
+enum NCRSeverity {
+  MINOR
+  MAJOR
+  CRITICAL
+}
+
+enum NCRDisposition {
+  REWORK
+  SCRAP
+  USE_AS_IS
+  RETURN_TO_SUPPLIER
+}
+
+// ─── Sterilization ────────────────────────────────────────────────────────────
+
+model SterilizationCycle {
+  id          String              @id @default(uuid())
+  cycleNumber String              @unique
+  method      SterilizationMethod
+  equipmentId String?
+  operatorId  String
+  startTime   DateTime
+  endTime     DateTime?
+  temperature Decimal?
+  pressure    Decimal?
+  duration    Int?
+  status      SterilizationStatus @default(PENDING)
+  biIndicatorResult String?
+  chemIndicatorResult String?
+  doseReceived Decimal?
+  notes       String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  operator User                 @relation(fields: [operatorId], references: [id])
+  batches  SterilizationBatch[]
+
+  @@index([operatorId])
+  @@index([status])
+  @@index([cycleNumber])
+}
+
+enum SterilizationMethod {
+  ETHYLENE_OXIDE
+  GAMMA_IRRADIATION
+  STEAM_AUTOCLAVE
+  DRY_HEAT
+  E_BEAM
+}
+
+enum SterilizationStatus {
+  PENDING
+  IN_CYCLE
+  PASSED
+  FAILED
+}
+
+model SterilizationBatch {
+  id             String   @id @default(uuid())
+  cycleId        String
+  batchId        String
+  quantityLoaded Int
+  createdAt      DateTime @default(now())
+
+  cycle SterilizationCycle @relation(fields: [cycleId], references: [id])
+  batch ProductionBatch    @relation(fields: [batchId], references: [id])
+
+  @@unique([cycleId, batchId])
+  @@index([cycleId])
+  @@index([batchId])
+}
+
+// ─── Finished Goods & Dispatch ────────────────────────────────────────────────
+
+model FinishedGood {
+  id          String   @id @default(uuid())
+  batchId     String
+  locationId  String?
+  lotNumber   String   @unique
+  quantity    Int
+  unitOfMeasure String @default("units")
+  receivedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  batch        ProductionBatch    @relation(fields: [batchId], references: [id])
+  location     WarehouseLocation? @relation(fields: [locationId], references: [id])
+  dispatchItems DispatchItem[]
+
+  @@index([batchId])
+  @@index([lotNumber])
+}
+
+model Dispatch {
+  id                  String         @id @default(uuid())
+  dispatchNumber      String         @unique
+  customerId          String?
+  customerName        String
+  destinationAddress  String?
+  status              DispatchStatus @default(DRAFT)
+  plannedDispatchDate DateTime
+  actualDispatchDate  DateTime?
+  carrier             String?
+  trackingNumber      String?
+  notes               String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  items DispatchItem[]
+
+  @@index([status])
+  @@index([dispatchNumber])
+}
+
+enum DispatchStatus {
+  DRAFT
+  PENDING
+  DISPATCHED
+  DELIVERED
+  RETURNED
+}
+
+model DispatchItem {
+  id             String   @id @default(uuid())
+  dispatchId     String
+  finishedGoodId String
+  quantity       Int
+  createdAt      DateTime @default(now())
+
+  dispatch     Dispatch     @relation(fields: [dispatchId], references: [id])
+  finishedGood FinishedGood @relation(fields: [finishedGoodId], references: [id])
+
+  @@unique([dispatchId, finishedGoodId])
+  @@index([dispatchId])
+  @@index([finishedGoodId])
+}
+
+// ─── Maintenance ─────────────────────────────────────────────────────────────
+
+model MaintenanceRecord {
+  id          String   @id @default(uuid())
+  machineId   String
+  technicianId String
+  type        String
+  description String
+  startTime   DateTime
+  endTime     DateTime?
+  outcome     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  machine    Machine @relation(fields: [machineId], references: [id])
+  technician User    @relation(fields: [technicianId], references: [id])
+
+  @@index([machineId])
+  @@index([technicianId])
+}
+
+// ─── Audit Log ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  userEmail   String?
+  action      String
+  entityType  String
+  entityId    String
+  previousState Json?
+  newState    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ─── Alerts ──────────────────────────────────────────────────────────────────
+
+model Alert {
+  id         String        @id @default(uuid())
+  severity   AlertSeverity
+  entityType String?
+  entityId   String?
+  title      String
+  message    String
+  isRead     Boolean       @default(false)
+  resolvedAt DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([severity])
+  @@index([isRead])
+  @@index([entityType, entityId])
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
